@@ -54,11 +54,29 @@
         <!-- Charts -->
         <section class="charts-section">
             <div class="chart-container">
-                <h3>Servers Online (Last 24h)</h3>
+                <div class="chart-header">
+                    <h3>Servers Online</h3>
+                    <div class="time-selector">
+                        <button class="time-btn active" data-period="1h" data-chart="servers">1H</button>
+                        <button class="time-btn" data-period="1d" data-chart="servers">1D</button>
+                        <button class="time-btn" data-period="1w" data-chart="servers">1W</button>
+                        <button class="time-btn" data-period="1m" data-chart="servers">1M</button>
+                        <button class="time-btn" data-period="1y" data-chart="servers">1Y</button>
+                    </div>
+                </div>
                 <canvas id="serversChart"></canvas>
             </div>
             <div class="chart-container">
-                <h3>Bots Active (Last 24h)</h3>
+                <div class="chart-header">
+                    <h3>Bots Active</h3>
+                    <div class="time-selector">
+                        <button class="time-btn active" data-period="1h" data-chart="bots">1H</button>
+                        <button class="time-btn" data-period="1d" data-chart="bots">1D</button>
+                        <button class="time-btn" data-period="1w" data-chart="bots">1W</button>
+                        <button class="time-btn" data-period="1m" data-chart="bots">1M</button>
+                        <button class="time-btn" data-period="1y" data-chart="bots">1Y</button>
+                    </div>
+                </div>
                 <canvas id="botsChart"></canvas>
             </div>
         </section>

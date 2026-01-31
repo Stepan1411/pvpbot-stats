@@ -2,10 +2,18 @@
 const BACKEND_URL = 'https://pvpbot-stats.up.railway.app/api/stats';
 const FALLBACK_URL = 'data/stats.json';
 
-// История данных для графиков (последние 24 часа)
-let serversHistory = [];
-let botsHistory = [];
-let timeLabels = [];
+// История данных для графиков
+let historyData = {
+    timestamps: [],
+    servers: [],
+    bots: []
+};
+
+// Текущий период отображения
+let currentPeriod = {
+    servers: '1h',
+    bots: '1h'
+};
 
 // Графики
 let serversChart = null;
@@ -18,6 +26,39 @@ let currentValues = {
     spawned: 0,
     killed: 0
 };
+
+// Загрузка истории из localStorage
+function loadHistory() {
+    try {
+        const saved = localStorage.getItem('statsHistory');
+        if (saved) {
+            historyData = JSON.parse(saved);
+            // Очищаем старые данные (старше 1 года)
+            const oneYearAgo = Date.now() - (365 * 24 * 60 * 60 * 1000);
+            const validIndices = historyData.timestamps
+                .map((ts, i) => ({ ts, i }))
+                .filter(item => item.ts > oneYearAgo)
+                .map(item => item.i);
+            
+            if (validIndices.length < historyData.timestamps.length) {
+                historyData.timestamps = validIndices.map(i => historyData.timestamps[i]);
+                historyData.servers = validIndices.map(i => historyData.servers[i]);
+                historyData.bots = validIndices.map(i => historyData.bots[i]);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load history:', e);
+    }
+}
+
+// Сохранение истории в localStorage
+function saveHistory() {
+    try {
+        localStorage.setItem('statsHistory', JSON.stringify(historyData));
+    } catch (e) {
+        console.error('Failed to save history:', e);
+    }
+}
 
 // Theme Toggle
 const themeSwitch = document.getElementById('theme-switch');
@@ -105,23 +146,79 @@ function animateValue(elementId, startValue, endValue) {
 
 // Обновление истории данных
 function updateHistory(data) {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const now = Date.now();
     
     // Добавляем новые данные
-    timeLabels.push(timeStr);
-    serversHistory.push(data.servers_online || 0);
-    botsHistory.push(data.bots_active || 0);
+    historyData.timestamps.push(now);
+    historyData.servers.push(data.servers_online || 0);
+    historyData.bots.push(data.bots_active || 0);
     
-    // Храним только последние 48 точек (24 часа при обновлении каждые 30 минут)
-    if (timeLabels.length > 48) {
-        timeLabels.shift();
-        serversHistory.shift();
-        botsHistory.shift();
+    // Ограничиваем размер истории (максимум 10000 точек)
+    if (historyData.timestamps.length > 10000) {
+        historyData.timestamps.shift();
+        historyData.servers.shift();
+        historyData.bots.shift();
     }
+    
+    // Сохраняем в localStorage
+    saveHistory();
     
     // Обновляем графики
     updateCharts();
+}
+
+// Фильтрация данных по периоду
+function filterDataByPeriod(period) {
+    const now = Date.now();
+    let cutoff;
+    
+    switch(period) {
+        case '1h':
+            cutoff = now - (60 * 60 * 1000); // 1 час
+            break;
+        case '1d':
+            cutoff = now - (24 * 60 * 60 * 1000); // 1 день
+            break;
+        case '1w':
+            cutoff = now - (7 * 24 * 60 * 60 * 1000); // 1 неделя
+            break;
+        case '1m':
+            cutoff = now - (30 * 24 * 60 * 60 * 1000); // 1 месяц
+            break;
+        case '1y':
+            cutoff = now - (365 * 24 * 60 * 60 * 1000); // 1 год
+            break;
+        default:
+            cutoff = now - (60 * 60 * 1000);
+    }
+    
+    const filtered = {
+        timestamps: [],
+        servers: [],
+        bots: [],
+        labels: []
+    };
+    
+    for (let i = 0; i < historyData.timestamps.length; i++) {
+        if (historyData.timestamps[i] >= cutoff) {
+            filtered.timestamps.push(historyData.timestamps[i]);
+            filtered.servers.push(historyData.servers[i]);
+            filtered.bots.push(historyData.bots[i]);
+            
+            const date = new Date(historyData.timestamps[i]);
+            let label;
+            if (period === '1h' || period === '1d') {
+                label = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            } else if (period === '1w') {
+                label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
+            } else {
+                label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            }
+            filtered.labels.push(label);
+        }
+    }
+    
+    return filtered;
 }
 
 // Инициализация графиков
@@ -164,13 +261,14 @@ function initCharts() {
     
     // График серверов
     const serversCtx = document.getElementById('serversChart').getContext('2d');
+    const serversData = filterDataByPeriod(currentPeriod.servers);
     serversChart = new Chart(serversCtx, {
         type: 'line',
         data: {
-            labels: timeLabels,
+            labels: serversData.labels,
             datasets: [{
                 label: 'Servers Online',
-                data: serversHistory,
+                data: serversData.servers,
                 borderColor: '#667eea',
                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                 fill: true,
@@ -182,13 +280,14 @@ function initCharts() {
     
     // График ботов
     const botsCtx = document.getElementById('botsChart').getContext('2d');
+    const botsData = filterDataByPeriod(currentPeriod.bots);
     botsChart = new Chart(botsCtx, {
         type: 'line',
         data: {
-            labels: timeLabels,
+            labels: botsData.labels,
             datasets: [{
                 label: 'Bots Active',
-                data: botsHistory,
+                data: botsData.bots,
                 borderColor: '#764ba2',
                 backgroundColor: 'rgba(118, 75, 162, 0.1)',
                 fill: true,
@@ -197,19 +296,43 @@ function initCharts() {
         },
         options: chartOptions
     });
+    
+    // Обработчики кнопок периодов
+    document.querySelectorAll('.time-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const period = this.dataset.period;
+            const chart = this.dataset.chart;
+            
+            // Обновляем активную кнопку
+            this.parentElement.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Обновляем период и график
+            currentPeriod[chart] = period;
+            updateChartData(chart, period);
+        });
+    });
+}
+
+// Обновление данных конкретного графика
+function updateChartData(chartName, period) {
+    const filtered = filterDataByPeriod(period);
+    
+    if (chartName === 'servers' && serversChart) {
+        serversChart.data.labels = filtered.labels;
+        serversChart.data.datasets[0].data = filtered.servers;
+        serversChart.update();
+    } else if (chartName === 'bots' && botsChart) {
+        botsChart.data.labels = filtered.labels;
+        botsChart.data.datasets[0].data = filtered.bots;
+        botsChart.update();
+    }
 }
 
 // Обновление графиков
 function updateCharts() {
-    if (serversChart && botsChart) {
-        serversChart.data.labels = timeLabels;
-        serversChart.data.datasets[0].data = serversHistory;
-        serversChart.update();
-        
-        botsChart.data.labels = timeLabels;
-        botsChart.data.datasets[0].data = botsHistory;
-        botsChart.update();
-    }
+    updateChartData('servers', currentPeriod.servers);
+    updateChartData('bots', currentPeriod.bots);
 }
 
 // Обновление цветов графиков при смене темы
@@ -231,6 +354,10 @@ function updateChartColors() {
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
+    // Загружаем историю из localStorage
+    loadHistory();
+    
+    // Инициализируем графики
     initCharts();
     
     // Загружаем статистику сразу
