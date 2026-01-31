@@ -91,20 +91,29 @@ def save_data():
 
 def load_history():
     """Загружает историю"""
-    global history
+    global history, global_stats
     
     # Сначала пробуем загрузить из Gist (приоритет)
     if GIST_TOKEN and GIST_ID:
         try:
             log("[HISTORY] Attempting to load from Gist...")
-            history_from_gist = load_from_gist()
-            if history_from_gist and 'timestamps' in history_from_gist and len(history_from_gist['timestamps']) > 0:
-                history = history_from_gist
-                log(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
-                save_history()  # Сохраняем локально
-                cleanup_old_history()
-                log(f"[HISTORY] After cleanup: {len(history['timestamps'])} points")
-                return
+            data_from_gist = load_from_gist()
+            if data_from_gist:
+                if 'history' in data_from_gist:
+                    history_data = data_from_gist['history']
+                    if history_data and 'timestamps' in history_data and len(history_data['timestamps']) > 0:
+                        history = history_data
+                        log(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
+                        
+                        # Загружаем глобальные счетчики
+                        if 'global_stats' in data_from_gist:
+                            global_stats.update(data_from_gist['global_stats'])
+                            log(f"[HISTORY] Loaded global stats - spawned: {global_stats['total_spawned']}, killed: {global_stats['total_killed']}")
+                        
+                        save_history()  # Сохраняем локально
+                        cleanup_old_history()
+                        log(f"[HISTORY] After cleanup: {len(history['timestamps'])} points")
+                        return
             else:
                 log("[HISTORY] Gist is empty or invalid")
         except Exception as e:
@@ -194,17 +203,23 @@ def backup_to_gist():
             "Accept": "application/vnd.github.v3+json"
         }
         
+        # Сохраняем историю + глобальные счетчики
+        backup_data = {
+            "history": history,
+            "global_stats": global_stats
+        }
+        
         data = {
             "files": {
                 "stats_history.json": {
-                    "content": json.dumps(history, indent=2)
+                    "content": json.dumps(backup_data, indent=2)
                 }
             }
         }
         
         response = requests.patch(url, headers=headers, json=data, timeout=10)
         if response.status_code == 200:
-            log(f"[BACKUP] Successfully backed up to Gist ({len(history['timestamps'])} points)")
+            log(f"[BACKUP] Successfully backed up to Gist ({len(history['timestamps'])} points, spawned: {global_stats['total_spawned']}, killed: {global_stats['total_killed']})")
         else:
             log(f"[BACKUP] Failed to backup to Gist: {response.status_code}")
     except Exception as e:
@@ -228,8 +243,21 @@ def load_from_gist():
             if 'files' in gist_data and 'stats_history.json' in gist_data['files']:
                 content = gist_data['files']['stats_history.json']['content']
                 data = json.loads(content)
-                log(f"[GIST] Successfully loaded {len(data.get('timestamps', []))} points")
-                return data
+                
+                # Проверяем формат данных
+                if 'history' in data and 'global_stats' in data:
+                    # Новый формат с глобальными счетчиками
+                    log(f"[GIST] Successfully loaded {len(data['history'].get('timestamps', []))} points, spawned: {data['global_stats'].get('total_spawned', 0)}, killed: {data['global_stats'].get('total_killed', 0)}")
+                    return data
+                elif 'timestamps' in data:
+                    # Старый формат - только история
+                    log(f"[GIST] Successfully loaded {len(data.get('timestamps', []))} points (old format)")
+                    return {
+                        'history': data,
+                        'global_stats': {'total_spawned': 0, 'total_killed': 0}
+                    }
+                else:
+                    log(f"[GIST] Unknown data format")
             else:
                 log(f"[GIST] File 'stats_history.json' not found in gist")
                 log(f"[GIST] Available files: {list(gist_data.get('files', {}).keys())}")

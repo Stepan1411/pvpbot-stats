@@ -30,6 +30,10 @@ let currentValues = {
     killed: 0
 };
 
+// Статус API
+let apiAvailable = true;
+let consecutiveFailures = 0;
+
 // Theme Toggle
 const themeSwitch = document.getElementById('theme-switch');
 const currentTheme = localStorage.getItem('theme') || 'light';
@@ -82,8 +86,23 @@ async function loadStats() {
         try {
             response = await fetch(BACKEND_URL);
             if (!response.ok) throw new Error('Backend unavailable');
+            
+            // API доступен
+            if (!apiAvailable) {
+                apiAvailable = true;
+                consecutiveFailures = 0;
+                hideApiBanner();
+            }
         } catch (backendError) {
             console.log('Backend unavailable, using fallback data');
+            consecutiveFailures++;
+            
+            // Показываем баннер после 2 неудачных попыток
+            if (consecutiveFailures >= 2 && apiAvailable) {
+                apiAvailable = false;
+                showApiBanner();
+            }
+            
             response = await fetch(FALLBACK_URL);
         }
         
@@ -105,7 +124,28 @@ async function loadStats() {
         
     } catch (error) {
         console.error('Failed to load stats:', error);
+        consecutiveFailures++;
+        
+        if (consecutiveFailures >= 2 && apiAvailable) {
+            apiAvailable = false;
+            showApiBanner();
+        }
+        
         document.getElementById('last-update').textContent = 'Failed to load';
+    }
+}
+
+function showApiBanner() {
+    const banner = document.getElementById('api-status-banner');
+    if (banner) {
+        banner.classList.remove('hidden');
+    }
+}
+
+function hideApiBanner() {
+    const banner = document.getElementById('api-status-banner');
+    if (banner) {
+        banner.classList.add('hidden');
     }
 }
 
