@@ -45,10 +45,14 @@ def get_stats():
     # Подсчитываем статистику
     servers_online = len(active_servers)
     bots_active = sum(data['bots_count'] for data in active_servers.values())
+    bots_spawned_total = sum(data.get('bots_spawned_total', 0) for data in active_servers.values())
+    bots_killed_total = sum(data.get('bots_killed_total', 0) for data in active_servers.values())
     
     stats = {
         "servers_online": servers_online,
         "bots_active": bots_active,
+        "bots_spawned_total": bots_spawned_total,
+        "bots_killed_total": bots_killed_total,
         "total_downloads": 0,  # TODO: получать из GitHub API
         "mod_version": "1.0.0",
         "last_update": datetime.utcnow().isoformat() + "Z",
@@ -82,12 +86,24 @@ def receive_stats():
         bots_count = data.get('bots_count', 0)
         
         # Сохраняем данные
-        servers[server_id] = {
+        if server_id not in servers:
+            servers[server_id] = {
+                'bots_spawned_total': 0,
+                'bots_killed_total': 0
+            }
+        
+        servers[server_id].update({
             'bots_count': bots_count,
             'mod_version': data.get('mod_version', 'unknown'),
             'minecraft_version': data.get('minecraft_version', 'unknown'),
             'last_seen': time.time()
-        }
+        })
+        
+        # Обновляем счетчики если переданы
+        if 'bots_spawned_total' in data:
+            servers[server_id]['bots_spawned_total'] = data['bots_spawned_total']
+        if 'bots_killed_total' in data:
+            servers[server_id]['bots_killed_total'] = data['bots_killed_total']
         
         # Сохраняем в файл
         save_data()
