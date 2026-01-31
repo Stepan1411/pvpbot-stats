@@ -13,6 +13,7 @@ import requests
 from datetime import datetime
 from pathlib import Path
 from threading import Thread, Lock
+import atexit
 
 app = Flask(__name__)
 CORS(app)
@@ -38,25 +39,41 @@ history = {
     "killed": []
 }
 
+# Глобальные счетчики (не сбрасываются)
+global_stats = {
+    "total_spawned": 0,
+    "total_killed": 0
+}
+
 # Счетчики и блокировки
 backup_counter = 0
 data_lock = Lock()
+background_thread = None
+stop_background = False
 
 def load_data():
     """Загружает данные серверов"""
     if DATA_FILE.exists():
         try:
             with open(DATA_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Загружаем серверы и глобальные счетчики
+                if isinstance(data, dict):
+                    if 'servers' in data:
+                        return data['servers'], data.get('global_stats', {"total_spawned": 0, "total_killed": 0})
+                    return data, {"total_spawned": 0, "total_killed": 0}
         except:
             pass
-    return {}
+    return {}, {"total_spawned": 0, "total_killed": 0}
 
 def save_data():
-    """Сохраняет данные серверов"""
+    """Сохраняет данные серверов и глобальные счетчики"""
     try:
         with open(DATA_FILE, 'w') as f:
-            json.dump(servers, f, indent=2)
+            json.dump({
+                'servers': servers,
+                'global_stats': global_stats
+            }, f, indent=2)
     except Exception as e:
         print(f"Failed to save data: {e}")
 
@@ -135,9 +152,7 @@ def add_to_history(stats):
         backup_counter += 1
         if backup_counter % 10 == 0:
             save_history()
-        
-        # Backup в Gist каждые 120 точек (10 минут при обновлении каждые 5 сек)
-        if backup_counter % 120 == 0 and GIST_TOKEN and GIST_ID:
+        if backup_counter % 12 == 0 and GIST_TOKEN and GIST_ID:
             Thread(target=backup_to_gist, daemon=True).start()
 
 def backup_to_gist():
@@ -187,15 +202,18 @@ def load_from_gist():
 def get_stats():
     """Возвращает текущую статистику"""
     current_time = time.time()
+    # Сервер считается активным если отправлял данные в последние 5 минут
     active_servers = {
         sid: data for sid, data in servers.items()
-        if current_time - data['last_seen'] < 7200
+        if current_time - data['last_seen'] < 60
     }
     
     servers_online = len(active_servers)
     bots_active = sum(data['bots_count'] for data in active_servers.values())
-    bots_spawned_total = sum(data.get('bots_spawned_total', 0) for data in active_servers.values())
-    bots_killed_total = sum(data.get('bots_killed_total', 0) for data in active_servers.values())
+    
+    # Используем глобальные счетчики вместо суммы по серверам
+    bots_spawned_total = global_stats['total_spawned']
+    bots_killed_total = global_stats['total_killed']
     
     return {
         "servers_online": servers_online,
@@ -227,23 +245,33 @@ def receive_stats():
         server_id = data['server_id']
         
         with data_lock:
+            # Инициализируем сервер если новый
             if server_id not in servers:
                 servers[server_id] = {
                     'bots_spawned_total': 0,
                     'bots_killed_total': 0
                 }
             
+            # Обновляем глобальные счетчики (только если значения увеличились)
+            old_spawned = servers[server_id].get('bots_spawned_total', 0)
+            old_killed = servers[server_id].get('bots_killed_total', 0)
+            new_spawned = data.get('bots_spawned_total', 0)
+            new_killed = data.get('bots_killed_total', 0)
+            
+            if new_spawned > old_spawned:
+                global_stats['total_spawned'] += (new_spawned - old_spawned)
+            if new_killed > old_killed:
+                global_stats['total_killed'] += (new_killed - old_killed)
+            
+            # Обновляем данные сервера
             servers[server_id].update({
                 'bots_count': data.get('bots_count', 0),
+                'bots_spawned_total': new_spawned,
+                'bots_killed_total': new_killed,
                 'mod_version': data.get('mod_version', 'unknown'),
                 'minecraft_version': data.get('minecraft_version', 'unknown'),
                 'last_seen': time.time()
             })
-            
-            if 'bots_spawned_total' in data:
-                servers[server_id]['bots_spawned_total'] = data['bots_spawned_total']
-            if 'bots_killed_total' in data:
-                servers[server_id]['bots_killed_total'] = data['bots_killed_total']
             
             save_data()
         
@@ -282,17 +310,79 @@ def health():
         "status": "ok",
         "data_points": len(history['timestamps']),
         "servers": len(servers),
-        "gist_enabled": bool(GIST_TOKEN and GIST_ID)
+        "gist_enabled": bool(GIST_TOKEN and GIST_ID),
+        "backup_counter": backup_counter,
+        "next_backup_in": 120 - (backup_counter % 120) if GIST_TOKEN and GIST_ID else None
     }), 200
+
+@app.route('/api/backup', methods=['POST'])
+def manual_backup():
+    """Ручной backup в Gist (для отладки)"""
+    if not GIST_TOKEN or not GIST_ID:
+        return jsonify({"error": "Gist not configured"}), 400
+    
+    try:
+        backup_to_gist()
+        return jsonify({"success": True, "message": "Backup completed"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def background_stats_collector():
+    """Фоновый поток для сбора статистики каждые 30 секунд"""
+    global stop_background
+    print("[BACKGROUND] Stats collector started")
+    
+    while not stop_background:
+        try:
+            # Ждем 30 секунд
+            for _ in range(30):
+                if stop_background:
+                    break
+                time.sleep(1)
+            
+            if stop_background:
+                break
+            
+            # Добавляем текущую статистику в историю
+            stats = get_stats()
+            add_to_history(stats)
+            
+        except Exception as e:
+            print(f"[BACKGROUND] Error: {e}")
+    
+    print("[BACKGROUND] Stats collector stopped")
+
+def start_background_collector():
+    """Запускает фоновый сборщик статистики"""
+    global background_thread
+    if background_thread is None or not background_thread.is_alive():
+        background_thread = Thread(target=background_stats_collector, daemon=True)
+        background_thread.start()
+
+def stop_background_collector():
+    """Останавливает фоновый сборщик"""
+    global stop_background
+    stop_background = True
+    if background_thread:
+        background_thread.join(timeout=5)
 
 if __name__ == '__main__':
     # Загружаем данные при старте
-    servers = load_data()
+    global servers, global_stats
+    servers, global_stats = load_data()
     load_history()
     
     print(f"[STARTUP] Loaded {len(servers)} servers")
+    print(f"[STARTUP] Total spawned: {global_stats['total_spawned']}")
+    print(f"[STARTUP] Total killed: {global_stats['total_killed']}")
     print(f"[STARTUP] Loaded {len(history['timestamps'])} history points")
     print(f"[STARTUP] Gist backup: {'enabled' if GIST_TOKEN and GIST_ID else 'disabled'}")
+    
+    # Запускаем фоновый сборщик статистики
+    start_background_collector()
+    
+    # Регистрируем остановку при выходе
+    atexit.register(stop_background_collector)
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
