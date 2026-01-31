@@ -136,8 +136,8 @@ def add_to_history(stats):
         if backup_counter % 10 == 0:
             save_history()
         
-        # Backup в Gist каждые 720 точек (примерно раз в час при обновлении каждые 5 сек)
-        if backup_counter % 720 == 0 and GIST_TOKEN and GIST_ID:
+        # Backup в Gist каждые 120 точек (10 минут при обновлении каждые 5 сек)
+        if backup_counter % 120 == 0 and GIST_TOKEN and GIST_ID:
             Thread(target=backup_to_gist, daemon=True).start()
 
 def backup_to_gist():
