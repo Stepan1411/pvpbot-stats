@@ -346,6 +346,43 @@ def manual_backup():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/test-gist', methods=['GET'])
+def test_gist():
+    """Тестирует загрузку из Gist (для отладки)"""
+    if not GIST_TOKEN or not GIST_ID:
+        return jsonify({"error": "Gist not configured"}), 400
+    
+    try:
+        data = load_from_gist()
+        if data:
+            return jsonify({
+                "success": True,
+                "data_points": len(data.get('timestamps', [])),
+                "first_timestamp": data.get('timestamps', [None])[0] if data.get('timestamps') else None,
+                "last_timestamp": data.get('timestamps', [None])[-1] if data.get('timestamps') else None,
+                "keys": list(data.keys())
+            }), 200
+        else:
+            return jsonify({"error": "Failed to load from Gist"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/reload-history', methods=['POST'])
+def reload_history():
+    """Перезагружает историю из Gist (для отладки)"""
+    if not GIST_TOKEN or not GIST_ID:
+        return jsonify({"error": "Gist not configured"}), 400
+    
+    try:
+        load_history()
+        return jsonify({
+            "success": True,
+            "data_points": len(history['timestamps']),
+            "message": "History reloaded"
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 def background_stats_collector():
     """Фоновый поток для сбора статистики каждые 30 секунд"""
     global stop_background
