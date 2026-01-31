@@ -1,15 +1,18 @@
 // URL бэкенда Railway
 const BACKEND_URL = 'https://pvpbot-stats.up.railway.app/api/stats';
+const HISTORY_URL = 'https://pvpbot-stats.up.railway.app/api/history';
 const FALLBACK_URL = 'data/stats.json';
 
-// История данных для графиков
+// История данных
 let historyData = {
     timestamps: [],
     servers: [],
-    bots: []
+    bots: [],
+    spawned: [],
+    killed: []
 };
 
-// Текущий период отображения
+// Текущий период
 let currentPeriod = {
     servers: '1h',
     bots: '1h'
@@ -19,46 +22,13 @@ let currentPeriod = {
 let serversChart = null;
 let botsChart = null;
 
-// Текущие значения для анимации
+// Текущие значения
 let currentValues = {
     servers: 0,
     bots: 0,
     spawned: 0,
     killed: 0
 };
-
-// Загрузка истории из localStorage
-function loadHistory() {
-    try {
-        const saved = localStorage.getItem('statsHistory');
-        if (saved) {
-            historyData = JSON.parse(saved);
-            // Очищаем старые данные (старше 1 года)
-            const oneYearAgo = Date.now() - (365 * 24 * 60 * 60 * 1000);
-            const validIndices = historyData.timestamps
-                .map((ts, i) => ({ ts, i }))
-                .filter(item => item.ts > oneYearAgo)
-                .map(item => item.i);
-            
-            if (validIndices.length < historyData.timestamps.length) {
-                historyData.timestamps = validIndices.map(i => historyData.timestamps[i]);
-                historyData.servers = validIndices.map(i => historyData.servers[i]);
-                historyData.bots = validIndices.map(i => historyData.bots[i]);
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load history:', e);
-    }
-}
-
-// Сохранение истории в localStorage
-function saveHistory() {
-    try {
-        localStorage.setItem('statsHistory', JSON.stringify(historyData));
-    } catch (e) {
-        console.error('Failed to save history:', e);
-    }
-}
 
 // Theme Toggle
 const themeSwitch = document.getElementById('theme-switch');
@@ -80,6 +50,31 @@ themeSwitch.addEventListener('change', function() {
     updateChartColors();
 });
 
+// Загрузка истории с backend
+async function loadHistory() {
+    try {
+        const response = await fetch(HISTORY_URL);
+        if (response.ok) {
+            const data = await response.json();
+            if (data && data.timestamps && data.timestamps.length > 0) {
+                // Конвертируем timestamps из секунд в миллисекунды
+                historyData = {
+                    timestamps: data.timestamps.map(ts => ts * 1000),
+                    servers: data.servers,
+                    bots: data.bots,
+                    spawned: data.spawned || [],
+                    killed: data.killed || []
+                };
+                console.log(`[HISTORY] Loaded ${historyData.timestamps.length} points from backend`);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load history from backend:', e);
+    }
+    return false;
+}
+
 // Загрузка статистики
 async function loadStats() {
     try {
@@ -94,24 +89,19 @@ async function loadStats() {
         
         const data = await response.json();
         
-        // Обновляем значения на странице с анимацией
+        // Обновляем значения с анимацией
         animateValue('servers-online', currentValues.servers, data.servers_online || 0);
         animateValue('bots-active', currentValues.bots, data.bots_active || 0);
         animateValue('bots-spawned', currentValues.spawned, data.bots_spawned_total || 0);
         animateValue('bots-killed', currentValues.killed, data.bots_killed_total || 0);
         
-        // Сохраняем текущие значения
         currentValues.servers = data.servers_online || 0;
         currentValues.bots = data.bots_active || 0;
         currentValues.spawned = data.bots_spawned_total || 0;
         currentValues.killed = data.bots_killed_total || 0;
         
-        // Обновляем время последнего обновления
         const lastUpdate = new Date(data.last_update);
         document.getElementById('last-update').textContent = lastUpdate.toLocaleString();
-        
-        // Добавляем данные в историю для графиков
-        updateHistory(data);
         
     } catch (error) {
         console.error('Failed to load stats:', error);
@@ -123,13 +113,12 @@ async function loadStats() {
 function animateValue(elementId, startValue, endValue) {
     const element = document.getElementById(elementId);
     
-    // Если значения одинаковые - просто устанавливаем
     if (startValue === endValue) {
         element.textContent = endValue;
         return;
     }
     
-    const duration = 500; // Быстрая анимация
+    const duration = 500;
     const range = endValue - startValue;
     const increment = range / (duration / 16);
     let current = startValue;
@@ -144,29 +133,6 @@ function animateValue(elementId, startValue, endValue) {
     }, 16);
 }
 
-// Обновление истории данных
-function updateHistory(data) {
-    const now = Date.now();
-    
-    // Добавляем новые данные
-    historyData.timestamps.push(now);
-    historyData.servers.push(data.servers_online || 0);
-    historyData.bots.push(data.bots_active || 0);
-    
-    // Ограничиваем размер истории (максимум 10000 точек)
-    if (historyData.timestamps.length > 10000) {
-        historyData.timestamps.shift();
-        historyData.servers.shift();
-        historyData.bots.shift();
-    }
-    
-    // Сохраняем в localStorage
-    saveHistory();
-    
-    // Обновляем графики
-    updateCharts();
-}
-
 // Фильтрация данных по периоду
 function filterDataByPeriod(period) {
     const now = Date.now();
@@ -174,19 +140,19 @@ function filterDataByPeriod(period) {
     
     switch(period) {
         case '1h':
-            cutoff = now - (60 * 60 * 1000); // 1 час
+            cutoff = now - (60 * 60 * 1000);
             break;
         case '1d':
-            cutoff = now - (24 * 60 * 60 * 1000); // 1 день
+            cutoff = now - (24 * 60 * 60 * 1000);
             break;
         case '1w':
-            cutoff = now - (7 * 24 * 60 * 60 * 1000); // 1 неделя
+            cutoff = now - (7 * 24 * 60 * 60 * 1000);
             break;
         case '1m':
-            cutoff = now - (30 * 24 * 60 * 60 * 1000); // 1 месяц
+            cutoff = now - (30 * 24 * 60 * 60 * 1000);
             break;
         case '1y':
-            cutoff = now - (365 * 24 * 60 * 60 * 1000); // 1 год
+            cutoff = now - (365 * 24 * 60 * 60 * 1000);
             break;
         default:
             cutoff = now - (60 * 60 * 1000);
@@ -259,7 +225,6 @@ function initCharts() {
         }
     };
     
-    // График серверов
     const serversCtx = document.getElementById('serversChart').getContext('2d');
     const serversData = filterDataByPeriod(currentPeriod.servers);
     serversChart = new Chart(serversCtx, {
@@ -278,7 +243,6 @@ function initCharts() {
         options: chartOptions
     });
     
-    // График ботов
     const botsCtx = document.getElementById('botsChart').getContext('2d');
     const botsData = filterDataByPeriod(currentPeriod.bots);
     botsChart = new Chart(botsCtx, {
@@ -297,24 +261,21 @@ function initCharts() {
         options: chartOptions
     });
     
-    // Обработчики кнопок периодов
     document.querySelectorAll('.time-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const period = this.dataset.period;
             const chart = this.dataset.chart;
             
-            // Обновляем активную кнопку
             this.parentElement.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             
-            // Обновляем период и график
             currentPeriod[chart] = period;
             updateChartData(chart, period);
         });
     });
 }
 
-// Обновление данных конкретного графика
+// Обновление данных графика
 function updateChartData(chartName, period) {
     const filtered = filterDataByPeriod(period);
     
@@ -329,13 +290,7 @@ function updateChartData(chartName, period) {
     }
 }
 
-// Обновление графиков
-function updateCharts() {
-    updateChartData('servers', currentPeriod.servers);
-    updateChartData('bots', currentPeriod.bots);
-}
-
-// Обновление цветов графиков при смене темы
+// Обновление цветов графиков
 function updateChartColors() {
     if (!serversChart || !botsChart) return;
     
@@ -352,17 +307,24 @@ function updateChartColors() {
     });
 }
 
-// Инициализация при загрузке страницы
-document.addEventListener('DOMContentLoaded', () => {
-    // Загружаем историю из localStorage
-    loadHistory();
+// Инициализация
+document.addEventListener('DOMContentLoaded', async () => {
+    // Загружаем историю с backend
+    await loadHistory();
     
     // Инициализируем графики
     initCharts();
     
-    // Загружаем статистику сразу
+    // Загружаем статистику
     loadStats();
     
-    // Обновляем статистику каждые 5 секунд для real-time эффекта
+    // Обновляем каждые 5 секунд
     setInterval(loadStats, 5 * 1000);
+    
+    // Обновляем историю каждые 30 секунд
+    setInterval(async () => {
+        await loadHistory();
+        updateChartData('servers', currentPeriod.servers);
+        updateChartData('bots', currentPeriod.bots);
+    }, 30 * 1000);
 });
