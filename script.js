@@ -358,13 +358,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Загружаем статистику
     loadStats();
     
-    // Обновляем каждые 5 секунд
+    // Обновляем статистику каждые 5 секунд
     setInterval(loadStats, 5 * 1000);
     
-    // Обновляем историю каждые 30 секунд
+    // Обновляем историю и графики каждые 5 секунд
     setInterval(async () => {
         await loadHistory();
         updateChartData('servers', currentPeriod.servers);
         updateChartData('bots', currentPeriod.bots);
-    }, 30 * 1000);
+    }, 5 * 1000);
 });
