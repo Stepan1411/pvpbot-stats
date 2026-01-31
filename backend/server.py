@@ -480,6 +480,16 @@ if __name__ == '__main__':
     try:
         load_history()
         log(f"[STARTUP] History loaded: {len(history['timestamps'])} points")
+        
+        # Если история не загрузилась, попробуем еще раз через 10 секунд
+        if len(history['timestamps']) == 0 and GIST_TOKEN and GIST_ID:
+            log("[STARTUP] History is empty, will retry in 10 seconds...")
+            def retry_load():
+                time.sleep(10)
+                log("[STARTUP] Retrying history load...")
+                load_history()
+                log(f"[STARTUP] After retry: {len(history['timestamps'])} points")
+            Thread(target=retry_load, daemon=True).start()
     except Exception as e:
         log(f"[STARTUP] Failed to load history: {e}")
         import traceback
