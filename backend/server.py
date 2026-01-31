@@ -63,60 +63,6 @@ background_thread = None
 stop_background = False
 initialized = False
 
-def initialize():
-    """Инициализация при старте приложения"""
-    global initialized, servers, global_stats, history
-    
-    if initialized:
-        return
-    
-    log("[STARTUP] Starting PVPBOT Stats Backend...")
-    log(f"[STARTUP] GIST_TOKEN: {'SET' if GIST_TOKEN else 'NOT SET'}")
-    log(f"[STARTUP] GIST_ID: {GIST_ID if GIST_ID else 'NOT SET'}")
-    
-    # Загружаем данные при старте
-    try:
-        servers_loaded, global_stats_loaded = load_data()
-        servers.update(servers_loaded)
-        global_stats.update(global_stats_loaded)
-        log(f"[STARTUP] Loaded {len(servers)} servers from local storage")
-    except Exception as e:
-        log(f"[STARTUP] Failed to load servers: {e}")
-    
-    try:
-        load_history()
-        log(f"[STARTUP] History loaded: {len(history['timestamps'])} points")
-        
-        # Если история не загрузилась, попробуем еще раз через 10 секунд
-        if len(history['timestamps']) == 0 and GIST_TOKEN and GIST_ID:
-            log("[STARTUP] History is empty, will retry in 10 seconds...")
-            def retry_load():
-                time.sleep(10)
-                log("[STARTUP] Retrying history load...")
-                load_history()
-                log(f"[STARTUP] After retry: {len(history['timestamps'])} points")
-            Thread(target=retry_load, daemon=True).start()
-    except Exception as e:
-        log(f"[STARTUP] Failed to load history: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    log(f"[STARTUP] Total spawned: {global_stats['total_spawned']}")
-    log(f"[STARTUP] Total killed: {global_stats['total_killed']}")
-    log(f"[STARTUP] Gist backup: {'enabled' if GIST_TOKEN and GIST_ID else 'disabled'}")
-    
-    # Запускаем фоновый сборщик статистики
-    start_background_collector()
-    
-    # Регистрируем остановку при выходе
-    atexit.register(stop_background_collector)
-    
-    initialized = True
-    log("[STARTUP] Initialization complete")
-
-# Инициализируем при импорте модуля
-initialize()
-
 def load_data():
     """Загружает данные серверов"""
     if DATA_FILE.exists():
@@ -517,6 +463,60 @@ def stop_background_collector():
     stop_background = True
     if background_thread:
         background_thread.join(timeout=5)
+
+def initialize():
+    """Инициализация при старте приложения"""
+    global initialized, servers, global_stats, history
+    
+    if initialized:
+        return
+    
+    log("[STARTUP] Starting PVPBOT Stats Backend...")
+    log(f"[STARTUP] GIST_TOKEN: {'SET' if GIST_TOKEN else 'NOT SET'}")
+    log(f"[STARTUP] GIST_ID: {GIST_ID if GIST_ID else 'NOT SET'}")
+    
+    # Загружаем данные при старте
+    try:
+        servers_loaded, global_stats_loaded = load_data()
+        servers.update(servers_loaded)
+        global_stats.update(global_stats_loaded)
+        log(f"[STARTUP] Loaded {len(servers)} servers from local storage")
+    except Exception as e:
+        log(f"[STARTUP] Failed to load servers: {e}")
+    
+    try:
+        load_history()
+        log(f"[STARTUP] History loaded: {len(history['timestamps'])} points")
+        
+        # Если история не загрузилась, попробуем еще раз через 10 секунд
+        if len(history['timestamps']) == 0 and GIST_TOKEN and GIST_ID:
+            log("[STARTUP] History is empty, will retry in 10 seconds...")
+            def retry_load():
+                time.sleep(10)
+                log("[STARTUP] Retrying history load...")
+                load_history()
+                log(f"[STARTUP] After retry: {len(history['timestamps'])} points")
+            Thread(target=retry_load, daemon=True).start()
+    except Exception as e:
+        log(f"[STARTUP] Failed to load history: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    log(f"[STARTUP] Total spawned: {global_stats['total_spawned']}")
+    log(f"[STARTUP] Total killed: {global_stats['total_killed']}")
+    log(f"[STARTUP] Gist backup: {'enabled' if GIST_TOKEN and GIST_ID else 'disabled'}")
+    
+    # Запускаем фоновый сборщик статистики
+    start_background_collector()
+    
+    # Регистрируем остановку при выходе
+    atexit.register(stop_background_collector)
+    
+    initialized = True
+    log("[STARTUP] Initialization complete")
+
+# Инициализируем при импорте модуля (после определения всех функций)
+initialize()
 
 if __name__ == '__main__':
     # Если запускаем напрямую через python
