@@ -11,6 +11,14 @@ let timeLabels = [];
 let serversChart = null;
 let botsChart = null;
 
+// Текущие значения для анимации
+let currentValues = {
+    servers: 0,
+    bots: 0,
+    spawned: 0,
+    killed: 0
+};
+
 // Theme Toggle
 const themeSwitch = document.getElementById('theme-switch');
 const currentTheme = localStorage.getItem('theme') || 'light';
@@ -45,11 +53,17 @@ async function loadStats() {
         
         const data = await response.json();
         
-        // Обновляем значения на странице
-        animateValue('servers-online', data.servers_online || 0);
-        animateValue('bots-active', data.bots_active || 0);
-        animateValue('bots-spawned', data.bots_spawned_total || 0);
-        animateValue('bots-killed', data.bots_killed_total || 0);
+        // Обновляем значения на странице с анимацией
+        animateValue('servers-online', currentValues.servers, data.servers_online || 0);
+        animateValue('bots-active', currentValues.bots, data.bots_active || 0);
+        animateValue('bots-spawned', currentValues.spawned, data.bots_spawned_total || 0);
+        animateValue('bots-killed', currentValues.killed, data.bots_killed_total || 0);
+        
+        // Сохраняем текущие значения
+        currentValues.servers = data.servers_online || 0;
+        currentValues.bots = data.bots_active || 0;
+        currentValues.spawned = data.bots_spawned_total || 0;
+        currentValues.killed = data.bots_killed_total || 0;
         
         // Обновляем время последнего обновления
         const lastUpdate = new Date(data.last_update);
@@ -65,10 +79,16 @@ async function loadStats() {
 }
 
 // Анимация чисел
-function animateValue(elementId, endValue) {
+function animateValue(elementId, startValue, endValue) {
     const element = document.getElementById(elementId);
-    const startValue = parseInt(element.textContent) || 0;
-    const duration = 1000;
+    
+    // Если значения одинаковые - просто устанавливаем
+    if (startValue === endValue) {
+        element.textContent = endValue;
+        return;
+    }
+    
+    const duration = 500; // Быстрая анимация
     const range = endValue - startValue;
     const increment = range / (duration / 16);
     let current = startValue;
@@ -212,8 +232,10 @@ function updateChartColors() {
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
+    
+    // Загружаем статистику сразу
     loadStats();
     
-    // Обновляем статистику каждые 5 минут
-    setInterval(loadStats, 5 * 60 * 1000);
+    // Обновляем статистику каждые 5 секунд для real-time эффекта
+    setInterval(loadStats, 5 * 1000);
 });
