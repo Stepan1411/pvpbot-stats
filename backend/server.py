@@ -182,7 +182,7 @@ def add_to_history(stats):
         backup_counter += 1
         if backup_counter % 10 == 0:
             save_history()
-        if backup_counter % 12 == 0 and GIST_TOKEN and GIST_ID:
+        if backup_counter % 2 == 0 and GIST_TOKEN and GIST_ID:
             Thread(target=backup_to_gist, daemon=True).start()
 
 def backup_to_gist():
@@ -242,10 +242,10 @@ def load_from_gist():
 def get_stats():
     """Возвращает текущую статистику"""
     current_time = time.time()
-    # Сервер считается активным если отправлял данные в последние 5 минут
+    # Сервер считается активным если отправлял данные в последние 10 секунд (2 пропущенных пакета)
     active_servers = {
         sid: data for sid, data in servers.items()
-        if current_time - data['last_seen'] < 60
+        if current_time - data['last_seen'] < 10
     }
     
     servers_online = len(active_servers)
@@ -315,9 +315,8 @@ def receive_stats():
             
             save_data()
         
-        # Добавляем в историю
-        stats = get_stats()
-        add_to_history(stats)
+        # НЕ добавляем точку здесь - точки добавляются только фоновым сборщиком каждые 30 секунд
+        log(f"[STATS] Received from {server_id[:8]}... - Bots: {data.get('bots_count', 0)}, Spawned: {new_spawned}, Killed: {new_killed}")
         
         return jsonify({"success": True}), 200
         
@@ -441,9 +440,10 @@ def background_stats_collector():
             if stop_background:
                 break
             
-            # Добавляем текущую статистику в историю
+            # Добавляем точку каждые 30 секунд (независимо от серверов)
             stats = get_stats()
             add_to_history(stats)
+            log(f"[BACKGROUND] Added history point - Servers: {stats['servers_online']}, Bots: {stats['bots_active']}, Spawned: {stats['bots_spawned_total']}, Killed: {stats['bots_killed_total']}")
             
         except Exception as e:
             log(f"[BACKGROUND] Error: {e}")
