@@ -368,8 +368,9 @@ def stop_background_collector():
 
 if __name__ == '__main__':
     # Загружаем данные при старте
-    global servers, global_stats
-    servers, global_stats = load_data()
+    servers_loaded, global_stats_loaded = load_data()
+    servers.update(servers_loaded)
+    global_stats.update(global_stats_loaded)
     load_history()
     
     print(f"[STARTUP] Loaded {len(servers)} servers")
