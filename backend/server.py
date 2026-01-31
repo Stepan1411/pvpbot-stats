@@ -14,9 +14,20 @@ from datetime import datetime
 from pathlib import Path
 from threading import Thread, Lock
 import atexit
+from collections import deque
 
 app = Flask(__name__)
 CORS(app)
+
+# Логи в памяти (последние 500 строк)
+log_buffer = deque(maxlen=500)
+
+def log(message):
+    """Логирует сообщение в консоль и в буфер"""
+    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    log_line = f"[{timestamp}] {message}"
+    print(log_line)
+    log_buffer.append(log_line)
 
 # Папка для данных (Railway Volume)
 DATA_DIR = Path(os.environ.get('DATA_DIR', './data'))
@@ -75,7 +86,7 @@ def save_data():
                 'global_stats': global_stats
             }, f, indent=2)
     except Exception as e:
-        print(f"Failed to save data: {e}")
+        log(f"Failed to save data: {e}")
 
 def load_history():
     """Загружает историю"""
@@ -84,33 +95,44 @@ def load_history():
     # Сначала пробуем загрузить из Gist (приоритет)
     if GIST_TOKEN and GIST_ID:
         try:
-            print("[HISTORY] Attempting to load from Gist...")
+            log("[HISTORY] Attempting to load from Gist...")
             history_from_gist = load_from_gist()
             if history_from_gist and 'timestamps' in history_from_gist and len(history_from_gist['timestamps']) > 0:
                 history = history_from_gist
+                log(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
                 save_history()  # Сохраняем локально
-                print(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
                 cleanup_old_history()
+                log(f"[HISTORY] After cleanup: {len(history['timestamps'])} points")
                 return
             else:
-                print("[HISTORY] Gist is empty or invalid")
+                log("[HISTORY] Gist is empty or invalid")
         except Exception as e:
-            print(f"[HISTORY] Failed to load from Gist: {e}")
+            log(f"[HISTORY] Failed to load from Gist: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        log("[HISTORY] Gist not configured, skipping")
     
     # Если Gist не сработал, пробуем локальный файл
     if HISTORY_FILE.exists():
         try:
+            log(f"[HISTORY] Loading from local file: {HISTORY_FILE}")
             with open(HISTORY_FILE, 'r') as f:
                 loaded = json.load(f)
                 if loaded and 'timestamps' in loaded and len(loaded['timestamps']) > 0:
                     history = loaded
-                    print(f"[HISTORY] Loaded {len(history['timestamps'])} points from local file")
+                    log(f"[HISTORY] Loaded {len(history['timestamps'])} points from local file")
                     cleanup_old_history()
+                    log(f"[HISTORY] After cleanup: {len(history['timestamps'])} points")
                     return
         except Exception as e:
-            print(f"[HISTORY] Failed to load from local file: {e}")
+            log(f"[HISTORY] Failed to load from local file: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        log(f"[HISTORY] Local file does not exist: {HISTORY_FILE}")
     
-    print("[HISTORY] No history found, starting fresh")
+    log("[HISTORY] No history found, starting fresh")
 
 def save_history():
     """Сохраняет историю локально"""
@@ -118,7 +140,7 @@ def save_history():
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f, indent=2)
     except Exception as e:
-        print(f"Failed to save history: {e}")
+        log(f"Failed to save history: {e}")
 
 def cleanup_old_history():
     """Удаляет данные старше 1 года"""
@@ -131,7 +153,7 @@ def cleanup_old_history():
         history['bots'] = [history['bots'][i] for i in valid_indices]
         history['spawned'] = [history['spawned'][i] for i in valid_indices]
         history['killed'] = [history['killed'][i] for i in valid_indices]
-        print(f"[HISTORY] Cleaned up old data, {len(valid_indices)} points remaining")
+        log(f"[HISTORY] Cleaned up old data, {len(valid_indices)} points remaining")
 
 def add_to_history(stats):
     """Добавляет точку в историю"""
@@ -181,11 +203,11 @@ def backup_to_gist():
         
         response = requests.patch(url, headers=headers, json=data, timeout=10)
         if response.status_code == 200:
-            print(f"[BACKUP] Successfully backed up to Gist ({len(history['timestamps'])} points)")
+            log(f"[BACKUP] Successfully backed up to Gist ({len(history['timestamps'])} points)")
         else:
-            print(f"[BACKUP] Failed to backup to Gist: {response.status_code}")
+            log(f"[BACKUP] Failed to backup to Gist: {response.status_code}")
     except Exception as e:
-        print(f"[BACKUP] Error backing up to Gist: {e}")
+        log(f"[BACKUP] Error backing up to Gist: {e}")
 
 def load_from_gist():
     """Загружает историю из GitHub Gist"""
@@ -196,24 +218,24 @@ def load_from_gist():
             "Accept": "application/vnd.github.v3+json"
         }
         
-        print(f"[GIST] Loading from {url}")
+        log(f"[GIST] Loading from {url}")
         response = requests.get(url, headers=headers, timeout=10)
-        print(f"[GIST] Response status: {response.status_code}")
+        log(f"[GIST] Response status: {response.status_code}")
         
         if response.status_code == 200:
             gist_data = response.json()
             if 'files' in gist_data and 'stats_history.json' in gist_data['files']:
                 content = gist_data['files']['stats_history.json']['content']
                 data = json.loads(content)
-                print(f"[GIST] Successfully loaded {len(data.get('timestamps', []))} points")
+                log(f"[GIST] Successfully loaded {len(data.get('timestamps', []))} points")
                 return data
             else:
-                print(f"[GIST] File 'stats_history.json' not found in gist")
-                print(f"[GIST] Available files: {list(gist_data.get('files', {}).keys())}")
+                log(f"[GIST] File 'stats_history.json' not found in gist")
+                log(f"[GIST] Available files: {list(gist_data.get('files', {}).keys())}")
         else:
-            print(f"[GIST] Failed with status {response.status_code}: {response.text[:200]}")
+            log(f"[GIST] Failed with status {response.status_code}: {response.text[:200]}")
     except Exception as e:
-        print(f"[GIST] Error loading from Gist: {e}")
+        log(f"[GIST] Error loading from Gist: {e}")
     return None
 
 def get_stats():
@@ -299,7 +321,7 @@ def receive_stats():
         return jsonify({"success": True}), 200
         
     except Exception as e:
-        print(f"Error: {e}")
+        log(f"Error in receive_stats: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stats', methods=['GET'])
@@ -383,10 +405,29 @@ def reload_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Возвращает последние логи"""
+    try:
+        lines = request.args.get('lines', 100, type=int)
+        lines = min(lines, 500)  # Максимум 500 строк
+        
+        logs_list = list(log_buffer)
+        if lines < len(logs_list):
+            logs_list = logs_list[-lines:]
+        
+        return jsonify({
+            "logs": logs_list,
+            "total_lines": len(log_buffer),
+            "returned_lines": len(logs_list)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 def background_stats_collector():
     """Фоновый поток для сбора статистики каждые 30 секунд"""
     global stop_background
-    print("[BACKGROUND] Stats collector started")
+    log("[BACKGROUND] Stats collector started")
     
     while not stop_background:
         try:
@@ -404,9 +445,9 @@ def background_stats_collector():
             add_to_history(stats)
             
         except Exception as e:
-            print(f"[BACKGROUND] Error: {e}")
+            log(f"[BACKGROUND] Error: {e}")
     
-    print("[BACKGROUND] Stats collector stopped")
+    log("[BACKGROUND] Stats collector stopped")
 
 def start_background_collector():
     """Запускает фоновый сборщик статистики"""
@@ -423,17 +464,30 @@ def stop_background_collector():
         background_thread.join(timeout=5)
 
 if __name__ == '__main__':
-    # Загружаем данные при старте
-    servers_loaded, global_stats_loaded = load_data()
-    servers.update(servers_loaded)
-    global_stats.update(global_stats_loaded)
-    load_history()
+    log("[STARTUP] Starting PVPBOT Stats Backend...")
+    log(f"[STARTUP] GIST_TOKEN: {'SET' if GIST_TOKEN else 'NOT SET'}")
+    log(f"[STARTUP] GIST_ID: {GIST_ID if GIST_ID else 'NOT SET'}")
     
-    print(f"[STARTUP] Loaded {len(servers)} servers")
-    print(f"[STARTUP] Total spawned: {global_stats['total_spawned']}")
-    print(f"[STARTUP] Total killed: {global_stats['total_killed']}")
-    print(f"[STARTUP] Loaded {len(history['timestamps'])} history points")
-    print(f"[STARTUP] Gist backup: {'enabled' if GIST_TOKEN and GIST_ID else 'disabled'}")
+    # Загружаем данные при старте
+    try:
+        servers_loaded, global_stats_loaded = load_data()
+        servers.update(servers_loaded)
+        global_stats.update(global_stats_loaded)
+        log(f"[STARTUP] Loaded {len(servers)} servers from local storage")
+    except Exception as e:
+        log(f"[STARTUP] Failed to load servers: {e}")
+    
+    try:
+        load_history()
+        log(f"[STARTUP] History loaded: {len(history['timestamps'])} points")
+    except Exception as e:
+        log(f"[STARTUP] Failed to load history: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    log(f"[STARTUP] Total spawned: {global_stats['total_spawned']}")
+    log(f"[STARTUP] Total killed: {global_stats['total_killed']}")
+    log(f"[STARTUP] Gist backup: {'enabled' if GIST_TOKEN and GIST_ID else 'disabled'}")
     
     # Запускаем фоновый сборщик статистики
     start_background_collector()
@@ -442,4 +496,5 @@ if __name__ == '__main__':
     atexit.register(stop_background_collector)
     
     port = int(os.environ.get('PORT', 5000))
+    log(f"[STARTUP] Starting server on port {port}")
     app.run(host='0.0.0.0', port=port)
