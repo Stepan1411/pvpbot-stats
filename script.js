@@ -1,5 +1,5 @@
-// URL бэкенда (обнови после деплоя на Railway)
-const BACKEND_URL = 'https://your-app.up.railway.app/api/stats';
+// URL бэкенда Railway
+const BACKEND_URL = 'https://pvpbot-stats.up.railway.app/api/stats';
 const FALLBACK_URL = 'data/stats.json';
 
 // Загрузка статистики
