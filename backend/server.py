@@ -343,7 +343,9 @@ def receive_stats():
             
             save_data()
         
-        # НЕ добавляем точку здесь - точки добавляются только фоновым сборщиком каждые 30 секунд
+        # Добавляем точку в историю при каждом получении данных (каждые 5 секунд)
+        stats = get_stats()
+        add_to_history(stats)
         log(f"[STATS] Received from {server_id[:8]}... - Bots: {data.get('bots_count', 0)}, Spawned: {new_spawned}, Killed: {new_killed}")
         
         return jsonify({"success": True}), 200
@@ -453,14 +455,14 @@ def get_logs():
         return jsonify({"error": str(e)}), 500
 
 def background_stats_collector():
-    """Фоновый поток для сбора статистики каждые 30 секунд"""
+    """Фоновый поток для сбора статистики каждые 5 секунд"""
     global stop_background
     log("[BACKGROUND] Stats collector started")
     
     while not stop_background:
         try:
-            # Ждем 30 секунд
-            for _ in range(30):
+            # Ждем 5 секунд
+            for _ in range(5):
                 if stop_background:
                     break
                 time.sleep(1)
@@ -468,10 +470,12 @@ def background_stats_collector():
             if stop_background:
                 break
             
-            # Добавляем точку каждые 30 секунд (независимо от серверов)
+            # Добавляем точку только если нет активных серверов
+            # (если есть серверы, они добавляют точки каждые 5 секунд)
             stats = get_stats()
-            add_to_history(stats)
-            log(f"[BACKGROUND] Added history point - Servers: {stats['servers_online']}, Bots: {stats['bots_active']}, Spawned: {stats['bots_spawned_total']}, Killed: {stats['bots_killed_total']}")
+            if stats['servers_online'] == 0:
+                add_to_history(stats)
+                log(f"[BACKGROUND] Added history point (no active servers)")
             
         except Exception as e:
             log(f"[BACKGROUND] Error: {e}")
