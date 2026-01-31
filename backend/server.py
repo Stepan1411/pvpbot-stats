@@ -81,29 +81,36 @@ def load_history():
     """Загружает историю"""
     global history
     
-    # Пробуем загрузить из локального файла
+    # Сначала пробуем загрузить из Gist (приоритет)
+    if GIST_TOKEN and GIST_ID:
+        try:
+            print("[HISTORY] Attempting to load from Gist...")
+            history_from_gist = load_from_gist()
+            if history_from_gist and 'timestamps' in history_from_gist and len(history_from_gist['timestamps']) > 0:
+                history = history_from_gist
+                save_history()  # Сохраняем локально
+                print(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
+                cleanup_old_history()
+                return
+            else:
+                print("[HISTORY] Gist is empty or invalid")
+        except Exception as e:
+            print(f"[HISTORY] Failed to load from Gist: {e}")
+    
+    # Если Gist не сработал, пробуем локальный файл
     if HISTORY_FILE.exists():
         try:
             with open(HISTORY_FILE, 'r') as f:
                 loaded = json.load(f)
-                if loaded and 'timestamps' in loaded:
+                if loaded and 'timestamps' in loaded and len(loaded['timestamps']) > 0:
                     history = loaded
-                    print(f"[HISTORY] Loaded {len(history['timestamps'])} points from file")
+                    print(f"[HISTORY] Loaded {len(history['timestamps'])} points from local file")
                     cleanup_old_history()
                     return
         except Exception as e:
-            print(f"Failed to load history from file: {e}")
+            print(f"[HISTORY] Failed to load from local file: {e}")
     
-    # Если локального файла нет, пробуем загрузить из Gist
-    if GIST_TOKEN and GIST_ID:
-        try:
-            history_from_gist = load_from_gist()
-            if history_from_gist:
-                history = history_from_gist
-                save_history()  # Сохраняем локально
-                print(f"[HISTORY] Loaded {len(history['timestamps'])} points from Gist")
-        except Exception as e:
-            print(f"Failed to load history from Gist: {e}")
+    print("[HISTORY] No history found, starting fresh")
 
 def save_history():
     """Сохраняет историю локально"""
@@ -189,14 +196,24 @@ def load_from_gist():
             "Accept": "application/vnd.github.v3+json"
         }
         
+        print(f"[GIST] Loading from {url}")
         response = requests.get(url, headers=headers, timeout=10)
+        print(f"[GIST] Response status: {response.status_code}")
+        
         if response.status_code == 200:
             gist_data = response.json()
             if 'files' in gist_data and 'stats_history.json' in gist_data['files']:
                 content = gist_data['files']['stats_history.json']['content']
-                return json.loads(content)
+                data = json.loads(content)
+                print(f"[GIST] Successfully loaded {len(data.get('timestamps', []))} points")
+                return data
+            else:
+                print(f"[GIST] File 'stats_history.json' not found in gist")
+                print(f"[GIST] Available files: {list(gist_data.get('files', {}).keys())}")
+        else:
+            print(f"[GIST] Failed with status {response.status_code}: {response.text[:200]}")
     except Exception as e:
-        print(f"[BACKUP] Error loading from Gist: {e}")
+        print(f"[GIST] Error loading from Gist: {e}")
     return None
 
 def get_stats():
@@ -311,8 +328,10 @@ def health():
         "data_points": len(history['timestamps']),
         "servers": len(servers),
         "gist_enabled": bool(GIST_TOKEN and GIST_ID),
+        "gist_id": GIST_ID if GIST_ID else None,
         "backup_counter": backup_counter,
-        "next_backup_in": 120 - (backup_counter % 120) if GIST_TOKEN and GIST_ID else None
+        "next_backup_in": 120 - (backup_counter % 120) if GIST_TOKEN and GIST_ID else None,
+        "global_stats": global_stats
     }), 200
 
 @app.route('/api/backup', methods=['POST'])
