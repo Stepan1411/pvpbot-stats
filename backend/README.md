@@ -20,7 +20,11 @@
 1. Зарегистрируйся на https://railway.app
 2. New Project → Deploy from GitHub
 3. Выбери репозиторий
-4. Railway автоматически определит Python и запустит
+4. Settings → Root Directory: `backend`
+5. Settings → Start Command: `gunicorn server:app` (должно быть автоматически)
+6. Deploy
+
+**Важно:** Railway должен автоматически определить Python и использовать `Procfile`
 
 ### Вариант 3: Heroku
 

@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import time
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,7 +17,6 @@ CORS(app)  # Разрешаем запросы с других доменов
 
 # Файл для хранения данных
 DATA_FILE = Path("stats_data.json")
-STATS_FILE = Path("../docs/data/stats.json")  # Для GitHub Pages
 
 # Хранилище серверов (в памяти)
 servers = {}
@@ -33,8 +33,8 @@ def save_data():
     with open(DATA_FILE, 'w') as f:
         json.dump(servers, f, indent=2)
 
-def update_stats_json():
-    """Обновляет stats.json для GitHub Pages"""
+def get_stats():
+    """Возвращает агрегированную статистику"""
     # Удаляем старые серверы (не отправляли данные больше 2 часов)
     current_time = time.time()
     active_servers = {
@@ -62,12 +62,11 @@ def update_stats_json():
         ]
     }
     
-    # Сохраняем
-    STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(STATS_FILE, 'w') as f:
-        json.dump(stats, f, indent=2)
-    
     return stats
+
+def update_stats_json():
+    """Обновляет stats.json для GitHub Pages (deprecated - теперь используем API)"""
+    return get_stats()
 
 @app.route('/api/stats', methods=['POST'])
 def receive_stats():
@@ -103,10 +102,10 @@ def receive_stats():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stats', methods=['GET'])
-def get_stats():
+def get_stats_endpoint():
     """Возвращает агрегированную статистику"""
     try:
-        stats = update_stats_json()
+        stats = get_stats()
         return jsonify(stats), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

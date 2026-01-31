@@ -1,7 +1,20 @@
+// URL бэкенда (обнови после деплоя на Railway)
+const BACKEND_URL = 'https://your-app.up.railway.app/api/stats';
+const FALLBACK_URL = 'data/stats.json';
+
 // Загрузка статистики
 async function loadStats() {
     try {
-        const response = await fetch('data/stats.json');
+        // Пробуем загрузить с бэкенда
+        let response;
+        try {
+            response = await fetch(BACKEND_URL);
+            if (!response.ok) throw new Error('Backend unavailable');
+        } catch (backendError) {
+            console.log('Backend unavailable, using fallback data');
+            response = await fetch(FALLBACK_URL);
+        }
+        
         const data = await response.json();
         
         // Обновляем значения на странице
