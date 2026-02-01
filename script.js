@@ -64,17 +64,22 @@ async function loadHistory() {
                 // Конвертируем timestamps из секунд в миллисекунды
                 historyData = {
                     timestamps: data.timestamps.map(ts => ts * 1000),
-                    servers: data.servers,
-                    bots: data.bots,
+                    servers: data.servers || [],
+                    bots: data.bots || [],
                     spawned: data.spawned || [],
                     killed: data.killed || []
                 };
                 console.log(`[HISTORY] Loaded ${historyData.timestamps.length} points from backend`);
+                console.log(`[HISTORY] Time range: ${new Date(historyData.timestamps[0]).toLocaleString()} - ${new Date(historyData.timestamps[historyData.timestamps.length - 1]).toLocaleString()}`);
                 return true;
+            } else {
+                console.warn('[HISTORY] No data received from backend');
             }
+        } else {
+            console.warn(`[HISTORY] Backend returned status ${response.status}`);
         }
     } catch (e) {
-        console.error('Failed to load history from backend:', e);
+        console.error('[HISTORY] Failed to load from backend:', e);
     }
     return false;
 }
@@ -205,11 +210,17 @@ function filterDataByPeriod(period) {
         labels: []
     };
     
+    // Проверяем что данные существуют
+    if (!historyData.timestamps || historyData.timestamps.length === 0) {
+        console.warn(`[FILTER] No history data available for period ${period}`);
+        return filtered;
+    }
+    
     for (let i = 0; i < historyData.timestamps.length; i++) {
         if (historyData.timestamps[i] >= cutoff) {
             filtered.timestamps.push(historyData.timestamps[i]);
-            filtered.servers.push(historyData.servers[i]);
-            filtered.bots.push(historyData.bots[i]);
+            filtered.servers.push(historyData.servers[i] || 0);
+            filtered.bots.push(historyData.bots[i] || 0);
             
             const date = new Date(historyData.timestamps[i]);
             let label;
@@ -224,6 +235,8 @@ function filterDataByPeriod(period) {
         }
     }
     
+    console.log(`[FILTER] Period ${period}: ${filtered.timestamps.length} points (from ${historyData.timestamps.length} total)`);
+    
     return filtered;
 }
 
@@ -236,9 +249,23 @@ function initCharts() {
     const chartOptions = {
         responsive: true,
         maintainAspectRatio: true,
+        animation: false,  // Отключаем все анимации
+        transitions: {
+            active: { animation: { duration: 0 } },
+            resize: { animation: { duration: 0 } },
+            show: { animation: { duration: 0 } },
+            hide: { animation: { duration: 0 } }
+        },
         plugins: {
             legend: {
                 display: false
+            },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                animation: {
+                    duration: 200  // Только tooltip анимация
+                }
             }
         },
         scales: {
@@ -246,7 +273,8 @@ function initCharts() {
                 beginAtZero: true,
                 ticks: {
                     color: textColor,
-                    precision: 0
+                    precision: 0,
+                    stepSize: 1
                 },
                 grid: {
                     color: gridColor
@@ -265,6 +293,7 @@ function initCharts() {
         }
     };
     
+    // График серверов
     const serversCtx = document.getElementById('serversChart').getContext('2d');
     const serversData = filterDataByPeriod(currentPeriod.servers);
     serversChart = new Chart(serversCtx, {
@@ -277,12 +306,16 @@ function initCharts() {
                 borderColor: '#667eea',
                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                 fill: true,
-                tension: 0.4
+                tension: 0.4,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                borderWidth: 2
             }]
         },
         options: chartOptions
     });
     
+    // График ботов
     const botsCtx = document.getElementById('botsChart').getContext('2d');
     const botsData = filterDataByPeriod(currentPeriod.bots);
     botsChart = new Chart(botsCtx, {
@@ -295,12 +328,16 @@ function initCharts() {
                 borderColor: '#764ba2',
                 backgroundColor: 'rgba(118, 75, 162, 0.1)',
                 fill: true,
-                tension: 0.4
+                tension: 0.4,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                borderWidth: 2
             }]
         },
         options: chartOptions
     });
     
+    // Обработчики кнопок времени
     document.querySelectorAll('.time-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const period = this.dataset.period;
@@ -322,11 +359,11 @@ function updateChartData(chartName, period) {
     if (chartName === 'servers' && serversChart) {
         serversChart.data.labels = filtered.labels;
         serversChart.data.datasets[0].data = filtered.servers;
-        serversChart.update();
+        serversChart.update('none');  // 'none' = без анимации
     } else if (chartName === 'bots' && botsChart) {
         botsChart.data.labels = filtered.labels;
         botsChart.data.datasets[0].data = filtered.bots;
-        botsChart.update();
+        botsChart.update('none');  // 'none' = без анимации
     }
 }
 
@@ -343,7 +380,7 @@ function updateChartColors() {
         chart.options.scales.y.grid.color = gridColor;
         chart.options.scales.x.ticks.color = textColor;
         chart.options.scales.x.grid.color = gridColor;
-        chart.update();
+        chart.update('none');  // 'none' = без анимации
     });
 }
 
