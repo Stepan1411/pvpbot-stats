@@ -12,6 +12,9 @@ let historyData = {
     killed: []
 };
 
+// Последняя загруженная точка
+let lastLoadedTimestamp = 0;
+
 // Текущий период
 let currentPeriod = {
     servers: '1h',
@@ -21,6 +24,27 @@ let currentPeriod = {
 // Графики
 let serversChart = null;
 let botsChart = null;
+
+// Debounce для обновления графиков
+let updateTimeout = null;
+function debouncedUpdateCharts() {
+    if (updateTimeout) {
+        clearTimeout(updateTimeout);
+    }
+    updateTimeout = setTimeout(() => {
+        requestAnimationFrame(() => {
+            updateChartData('servers', currentPeriod.servers);
+            updateChartData('bots', currentPeriod.bots);
+        });
+    }, 250); // 250ms задержка (увеличено с 100ms)
+}
+
+// Кэш отфильтрованных данных
+let filteredDataCache = {
+    servers: {},
+    bots: {}
+};
+let lastFilterTime = 0;
 
 // Текущие значения
 let currentValues = {
@@ -62,15 +86,40 @@ async function loadHistory() {
             const data = await response.json();
             if (data && data.timestamps && data.timestamps.length > 0) {
                 // Конвертируем timestamps из секунд в миллисекунды
-                historyData = {
+                const newData = {
                     timestamps: data.timestamps.map(ts => ts * 1000),
                     servers: data.servers || [],
                     bots: data.bots || [],
                     spawned: data.spawned || [],
                     killed: data.killed || []
                 };
-                console.log(`[HISTORY] Loaded ${historyData.timestamps.length} points from backend`);
-                console.log(`[HISTORY] Time range: ${new Date(historyData.timestamps[0]).toLocaleString()} - ${new Date(historyData.timestamps[historyData.timestamps.length - 1]).toLocaleString()}`);
+                
+                // Если это первая загрузка, загружаем всё
+                if (historyData.timestamps.length === 0) {
+                    historyData = newData;
+                    lastLoadedTimestamp = newData.timestamps[newData.timestamps.length - 1];
+                    console.log(`[HISTORY] Initial load: ${historyData.timestamps.length} points`);
+                    console.log(`[HISTORY] Time range: ${new Date(historyData.timestamps[0]).toLocaleString()} - ${new Date(lastLoadedTimestamp).toLocaleString()}`);
+                } else {
+                    // Инкрементальное обновление - добавляем только новые точки
+                    let addedPoints = 0;
+                    for (let i = 0; i < newData.timestamps.length; i++) {
+                        if (newData.timestamps[i] > lastLoadedTimestamp) {
+                            historyData.timestamps.push(newData.timestamps[i]);
+                            historyData.servers.push(newData.servers[i] || 0);
+                            historyData.bots.push(newData.bots[i] || 0);
+                            historyData.spawned.push(newData.spawned[i] || 0);
+                            historyData.killed.push(newData.killed[i] || 0);
+                            addedPoints++;
+                        }
+                    }
+                    
+                    if (addedPoints > 0) {
+                        lastLoadedTimestamp = historyData.timestamps[historyData.timestamps.length - 1];
+                        console.log(`[HISTORY] Added ${addedPoints} new points, total: ${historyData.timestamps.length}`);
+                    }
+                }
+                
                 return true;
             } else {
                 console.warn('[HISTORY] No data received from backend');
@@ -178,29 +227,50 @@ function animateValue(elementId, startValue, endValue) {
     }, 16);
 }
 
-// Фильтрация данных по периоду
+// Фильтрация данных по периоду с прореживанием и кэшированием
 function filterDataByPeriod(period) {
     const now = Date.now();
+    
+    // Проверяем кэш (обновляем не чаще раза в секунду)
+    if (filteredDataCache[period] && (now - lastFilterTime) < 1000) {
+        return filteredDataCache[period];
+    }
+    
     let cutoff;
+    let decimationFactor = 1; // Сколько точек пропускать
     
     switch(period) {
+        case '10m':
+            cutoff = now - (10 * 60 * 1000);
+            decimationFactor = 1; // Все точки (120 точек)
+            break;
+        case '30m':
+            cutoff = now - (30 * 60 * 1000);
+            decimationFactor = 1; // Все точки (360 точек)
+            break;
         case '1h':
             cutoff = now - (60 * 60 * 1000);
+            decimationFactor = 1; // Все точки (720 точек)
             break;
         case '1d':
             cutoff = now - (24 * 60 * 60 * 1000);
+            decimationFactor = 6; // Каждая 6-я точка (2880 точек)
             break;
         case '1w':
             cutoff = now - (7 * 24 * 60 * 60 * 1000);
+            decimationFactor = 24; // Каждая 24-я точка (2 минуты)
             break;
         case '1m':
             cutoff = now - (30 * 24 * 60 * 60 * 1000);
+            decimationFactor = 120; // Каждая 120-я точка (10 минут)
             break;
         case '1y':
             cutoff = now - (365 * 24 * 60 * 60 * 1000);
+            decimationFactor = 720; // Каждая 720-я точка (1 час)
             break;
         default:
             cutoff = now - (60 * 60 * 1000);
+            decimationFactor = 1;
     }
     
     const filtered = {
@@ -216,26 +286,37 @@ function filterDataByPeriod(period) {
         return filtered;
     }
     
+    let pointCounter = 0;
     for (let i = 0; i < historyData.timestamps.length; i++) {
         if (historyData.timestamps[i] >= cutoff) {
-            filtered.timestamps.push(historyData.timestamps[i]);
-            filtered.servers.push(historyData.servers[i] || 0);
-            filtered.bots.push(historyData.bots[i] || 0);
-            
-            const date = new Date(historyData.timestamps[i]);
-            let label;
-            if (period === '1h' || period === '1d') {
-                label = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-            } else if (period === '1w') {
-                label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
-            } else {
-                label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            // Прореживание: берём только каждую N-ю точку
+            if (pointCounter % decimationFactor === 0) {
+                filtered.timestamps.push(historyData.timestamps[i]);
+                filtered.servers.push(historyData.servers[i] || 0);
+                filtered.bots.push(historyData.bots[i] || 0);
+                
+                const date = new Date(historyData.timestamps[i]);
+                let label;
+                if (period === '10m' || period === '30m' || period === '1h') {
+                    label = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                } else if (period === '1d') {
+                    label = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                } else if (period === '1w') {
+                    label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
+                } else {
+                    label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }
+                filtered.labels.push(label);
             }
-            filtered.labels.push(label);
+            pointCounter++;
         }
     }
     
-    console.log(`[FILTER] Period ${period}: ${filtered.timestamps.length} points (from ${historyData.timestamps.length} total)`);
+    // Сохраняем в кэш
+    filteredDataCache[period] = filtered;
+    lastFilterTime = now;
+    
+    console.log(`[FILTER] Period ${period}: ${filtered.timestamps.length} points (from ${historyData.timestamps.length} total, decimation: ${decimationFactor}x)`);
     
     return filtered;
 }
@@ -256,6 +337,11 @@ function initCharts() {
             show: { animation: { duration: 0 } },
             hide: { animation: { duration: 0 } }
         },
+        interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+        },
         plugins: {
             legend: {
                 display: false
@@ -264,8 +350,23 @@ function initCharts() {
                 mode: 'index',
                 intersect: false,
                 animation: {
-                    duration: 200  // Только tooltip анимация
+                    duration: 0  // Отключаем даже tooltip анимацию
                 }
+            },
+            decimation: {
+                enabled: true,
+                algorithm: 'lttb',  // Largest-Triangle-Three-Buckets
+                samples: 500  // Максимум 500 точек на графике
+            }
+        },
+        elements: {
+            point: {
+                radius: 0,  // Убираем точки полностью
+                hitRadius: 10,  // Но оставляем область для hover
+                hoverRadius: 4  // Показываем точку только при hover
+            },
+            line: {
+                borderWidth: 2
             }
         },
         scales: {
@@ -274,20 +375,26 @@ function initCharts() {
                 ticks: {
                     color: textColor,
                     precision: 0,
-                    stepSize: 1
+                    stepSize: 1,
+                    maxTicksLimit: 8  // Ограничиваем количество меток
                 },
                 grid: {
-                    color: gridColor
+                    color: gridColor,
+                    drawTicks: false
                 }
             },
             x: {
                 ticks: {
                     color: textColor,
                     maxRotation: 45,
-                    minRotation: 45
+                    minRotation: 45,
+                    maxTicksLimit: 12,  // Максимум 12 меток на оси X
+                    autoSkip: true,
+                    autoSkipPadding: 10
                 },
                 grid: {
-                    color: gridColor
+                    color: gridColor,
+                    drawTicks: false
                 }
             }
         }
@@ -306,10 +413,7 @@ function initCharts() {
                 borderColor: '#667eea',
                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                 fill: true,
-                tension: 0.4,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                borderWidth: 2
+                tension: 0.4
             }]
         },
         options: chartOptions
@@ -328,10 +432,7 @@ function initCharts() {
                 borderColor: '#764ba2',
                 backgroundColor: 'rgba(118, 75, 162, 0.1)',
                 fill: true,
-                tension: 0.4,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                borderWidth: 2
+                tension: 0.4
             }]
         },
         options: chartOptions
@@ -352,18 +453,28 @@ function initCharts() {
     });
 }
 
-// Обновление данных графика
+// Обновление данных графика (оптимизированная версия)
 function updateChartData(chartName, period) {
     const filtered = filterDataByPeriod(period);
     
     if (chartName === 'servers' && serversChart) {
-        serversChart.data.labels = filtered.labels;
-        serversChart.data.datasets[0].data = filtered.servers;
-        serversChart.update('none');  // 'none' = без анимации
+        // Проверяем, изменились ли данные
+        const currentLength = serversChart.data.labels.length;
+        if (currentLength !== filtered.labels.length || 
+            serversChart.data.datasets[0].data[currentLength - 1] !== filtered.servers[filtered.servers.length - 1]) {
+            serversChart.data.labels = filtered.labels;
+            serversChart.data.datasets[0].data = filtered.servers;
+            serversChart.update('none');  // 'none' = без анимации
+        }
     } else if (chartName === 'bots' && botsChart) {
-        botsChart.data.labels = filtered.labels;
-        botsChart.data.datasets[0].data = filtered.bots;
-        botsChart.update('none');  // 'none' = без анимации
+        // Проверяем, изменились ли данные
+        const currentLength = botsChart.data.labels.length;
+        if (currentLength !== filtered.labels.length || 
+            botsChart.data.datasets[0].data[currentLength - 1] !== filtered.bots[filtered.bots.length - 1]) {
+            botsChart.data.labels = filtered.labels;
+            botsChart.data.datasets[0].data = filtered.bots;
+            botsChart.update('none');  // 'none' = без анимации
+        }
     }
 }
 
@@ -400,8 +511,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Обновляем историю и графики каждые 5 секунд
     setInterval(async () => {
+        const oldLength = historyData.timestamps.length;
         await loadHistory();
-        updateChartData('servers', currentPeriod.servers);
-        updateChartData('bots', currentPeriod.bots);
-    }, 5 * 1000);
+        
+        // Обновляем графики только если добавились новые точки
+        if (historyData.timestamps.length > oldLength) {
+            debouncedUpdateCharts();
+        }
+    }, 5 * 1000);  // 5 секунд
 });
