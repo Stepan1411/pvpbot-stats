@@ -350,7 +350,31 @@ function initCharts() {
                 mode: 'index',
                 intersect: false,
                 animation: {
-                    duration: 0  // Отключаем даже tooltip анимацию
+                    duration: 200  // Анимация появления tooltip
+                },
+                callbacks: {
+                    // Плавное перемещение tooltip
+                    beforeUpdate: function(context) {
+                        const chart = context.chart;
+                        const tooltip = chart.tooltip;
+                        
+                        if (tooltip && tooltip.opacity > 0) {
+                            // Сохраняем предыдущую позицию
+                            if (!tooltip._previousX) {
+                                tooltip._previousX = tooltip.x;
+                                tooltip._previousY = tooltip.y;
+                            }
+                            
+                            // Плавная интерполяция позиции
+                            const smoothing = 0.3; // Коэффициент сглаживания (0-1)
+                            tooltip.x = tooltip._previousX + (tooltip.x - tooltip._previousX) * smoothing;
+                            tooltip.y = tooltip._previousY + (tooltip.y - tooltip._previousY) * smoothing;
+                            
+                            // Обновляем предыдущую позицию
+                            tooltip._previousX = tooltip.x;
+                            tooltip._previousY = tooltip.y;
+                        }
+                    }
                 }
             },
             decimation: {
