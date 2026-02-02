@@ -1,6 +1,6 @@
-// URL бэкенда Replit
-const BACKEND_URL = 'https://pvpbot-stats--stepanksv141114.replit.app/api/stats';
-const HISTORY_URL = 'https://pvpbot-stats--stepanksv141114.replit.app/api/history';
+// URL бэкенда PythonAnywhere
+const BACKEND_URL = 'https://stepan1411.pythonanywhere.com/api/stats';
+const HISTORY_URL = 'https://stepan1411.pythonanywhere.com/api/history';
 const FALLBACK_URL = 'data/stats.json';
 
 // История данных
