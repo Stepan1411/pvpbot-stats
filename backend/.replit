@@ -1,0 +1,27 @@
+modules = ["python-3.11"]
+
+[nix]
+channel = "stable-24_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 server.py"
+waitForPort = 5000
+
+[deployment]
+run = ["sh", "-c", "python3 server.py"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
